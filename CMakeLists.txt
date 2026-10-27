@@ -3,6 +3,8 @@ cmake_minimum_required(VERSION 3.10)
 option(DTV "Enable video output" OFF)
 option(PIRANHA_ENABLED "Enable scripting input" ON)
 option(DISCORD_ENABLED "Enable Discord Rich Presence" ON)
+option(PORTABLE_RELEASE "Build the standalone Windows distribution without changing desktop defaults" OFF)
+set(PORTABLE_D3DX_ROOT "" CACHE PATH "Extracted official Microsoft.DXSDK.D3DX package")
 
 if (DTV)
     add_compile_definitions(ATG_ENGINE_SIM_VIDEO_CAPTURE)
@@ -207,6 +209,8 @@ add_executable(engine-sim-app WIN32
     # Source files
     src/main.cpp
     src/engine_sim_application.cpp
+    src/history_ui_validation.cpp
+    src/history_channels.cpp
     src/geometry_generator.cpp
     src/simulation_object.cpp
     src/piston_object.cpp
@@ -301,9 +305,41 @@ target_include_directories(engine-sim-app
 
 add_subdirectory(dependencies)
 
+if (PORTABLE_RELEASE)
+    if (NOT WIN32 OR NOT EXISTS "${PORTABLE_D3DX_ROOT}/build/native/release/lib/x64/d3dx10.lib")
+        message(FATAL_ERROR "PORTABLE_RELEASE requires Windows x64 and the official D3DX release package")
+    endif ()
+    # The pinned delta-studio links both release and developer-only debug D3DX
+    # libraries unconditionally. Override its link lists without altering its source.
+    foreach(property LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
+        get_target_property(libraries delta-core ${property})
+        list(FILTER libraries EXCLUDE REGEX "[Dd]3[Dd][Xx](9|10|11)d?\\.lib$")
+        foreach(version 9 10 11)
+            list(APPEND libraries "${PORTABLE_D3DX_ROOT}/build/native/release/lib/x64/d3dx${version}.lib")
+        endforeach ()
+        set_property(TARGET delta-core PROPERTY ${property} "${libraries}")
+    endforeach ()
+    target_compile_definitions(engine-sim-app PRIVATE ATG_ENGINE_SIM_PORTABLE_RELEASE)
+    target_sources(engine-sim-app PRIVATE resources/portable.rc)
+    target_include_directories(engine-sim-app PRIVATE resources)
+    # The application exclusively selects DX11. Do not require an unused Vulkan
+    # loader to be installed on a recipient's PC just to load the executable.
+    target_link_libraries(engine-sim-app delayimp)
+    set_property(TARGET engine-sim-app APPEND_STRING PROPERTY LINK_FLAGS " /DELAYLOAD:vulkan-1.dll /MANIFEST:NO")
+endif ()
+
 # GTEST
 
 enable_testing()
+
+# Standalone calibration tests: no graphics/audio DLLs or engine model required.
+add_executable(frequency-calibration-test test/frequency_calibration_tests.cpp)
+target_link_libraries(frequency-calibration-test PRIVATE gtest_main)
+add_executable(history-clock-test test/history_clock_tests.cpp test/history_continuity_tests.cpp
+    test/dyno_history_reading_tests.cpp)
+target_sources(history-clock-test PRIVATE test/history_lookup_tests.cpp)
+target_sources(history-clock-test PRIVATE test/history_render_indices_tests.cpp)
+target_link_libraries(history-clock-test PRIVATE gtest_main)
 
 add_executable(engine-sim-test
     # Source files

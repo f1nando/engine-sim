@@ -3,6 +3,7 @@
 #include "../include/geometry_generator.h"
 #include "../include/engine_sim_application.h"
 #include "../include/ui_utilities.h"
+#include "../include/history_render_indices.h"
 
 Oscilloscope::Oscilloscope() {
     m_xMin = m_xMax = 0;
@@ -57,16 +58,17 @@ void Oscilloscope::render() {
 }
 
 void Oscilloscope::render(const Bounds &bounds) {
-    for (int i = 0; i < m_pointCount; ++i) {
-        const int index = (m_writeIndex - m_pointCount + i + m_bufferSize) % m_bufferSize;
-        m_renderBuffer[index] = dataPointToRenderPosition(m_points[index], bounds);
+    if (m_pointCount < 2 || m_bufferSize == 0) return;
+    const int sourceStart = (m_writeIndex - m_pointCount + m_bufferSize) % m_bufferSize;
+    const auto indices = historyRenderIndices(m_pointCount, m_maxRenderPoints,
+        [&](int i) { return m_points[(sourceStart + i) % m_bufferSize].y; });
+    for (int i = 0; i < static_cast<int>(indices.size()); ++i) {
+        m_renderBuffer[i] = dataPointToRenderPosition(m_points[(sourceStart + indices[i]) % m_bufferSize], bounds);
     }
 
-    const int start = (m_writeIndex - m_pointCount + m_bufferSize) % m_bufferSize;
-    const int n0 = (start + m_pointCount) > m_bufferSize
-        ? m_bufferSize - start
-        : m_pointCount;
-    const int n1 = m_pointCount - n0;
+    const int start = 0;
+    const int n0 = static_cast<int>(indices.size());
+    const int n1 = 0;
 
     GeometryGenerator::GeometryIndices lines;
     GeometryGenerator::PathParameters params;
@@ -106,9 +108,14 @@ void Oscilloscope::render(const Bounds &bounds) {
         const bool detached =
             prev.x > p_i.x
             || std::abs(p_i.x - prev.x) > pixelsToUnits(100.0f);
+        bool gap = false;
+        for (int j = indices[i - 1] + 1; j <= indices[i]; ++j) {
+            gap = gap || m_points[(sourceStart + j) % m_bufferSize].breakBefore;
+        }
         m_app->getGeometryGenerator()->generatePathSegment(
             params,
-            (detached || lastDetached) && !m_drawReverse);
+            gap
+                || ((detached || lastDetached) && !m_drawReverse));
 
         lastDetached = detached;
 
@@ -159,7 +166,7 @@ Point Oscilloscope::dataPointToRenderPosition(
 }
 
 void Oscilloscope::addDataPoint(double x, double y) {
-    m_points[m_writeIndex] = { x, y };
+    m_points[m_writeIndex] = { x, y, m_continuity.beginPoint() };
     m_writeIndex = (m_writeIndex + 1) % m_bufferSize;
     m_pointCount = (m_pointCount >= m_bufferSize)
         ? m_bufferSize
@@ -192,6 +199,15 @@ void Oscilloscope::setBufferSize(int n) {
 }
 
 void Oscilloscope::reset() {
+    m_continuity.reset();
     m_writeIndex = 0;
     m_pointCount = 0;
+}
+
+void Oscilloscope::discardBeforeX(double x) {
+    while (m_pointCount > 0) {
+        const int oldest = (m_writeIndex - m_pointCount + m_bufferSize) % m_bufferSize;
+        if (m_points[oldest].x >= x) break;
+        --m_pointCount;
+    }
 }

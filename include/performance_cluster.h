@@ -21,6 +21,7 @@ class PerformanceCluster : public UiElement {
 
         virtual void update(float dt);
         virtual void render();
+        void bindHistoryChannels();
 
         void setSimulator(Simulator *simulator) { m_simulator = simulator; }
         void addTimePerTimestepSample(double sample);

@@ -19,6 +19,8 @@ es_script::Compiler::Output *es_script::Compiler::output() {
 }
 
 void es_script::Compiler::initialize() {
+    // Each reload produces a fresh output; do not reuse pointers from the old engine.
+    *output() = Output{};
     m_compiler = new piranha::Compiler(&m_rules);
     m_compiler->setFileExtension(".mr");
 

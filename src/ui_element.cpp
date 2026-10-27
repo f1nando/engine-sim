@@ -36,6 +36,7 @@ void UiElement::destroy() {
 }
 
 void UiElement::update(float dt) {
+    if (!m_historyChannel.empty()) m_mouseBounds = m_bounds;
     for (UiElement *child : m_children) {
         child->update(dt);
     }
@@ -44,6 +45,10 @@ void UiElement::update(float dt) {
 void UiElement::render() {
     for (UiElement *child : m_children) {
         if (child->isVisible()) child->render();
+    }
+    if (!m_historyChannel.empty() && m_app->isHistorySelected(m_historyChannel)) {
+        drawFrame(m_bounds.inset(2.0f), 2.0f, m_app->getHistoryColor(m_historyChannel),
+            m_app->getBackgroundColor(), false);
     }
 }
 
@@ -60,6 +65,10 @@ void UiElement::onMouseUp(const Point &mouseLocal) {
 }
 
 void UiElement::onMouseClick(const Point &mouseLocal) {
+    if (!m_historyChannel.empty()) {
+        m_app->toggleHistory(m_historyChannel);
+        return;
+    }
     signal(Event::Clicked);
 }
 
@@ -82,7 +91,7 @@ void UiElement::onMouseScroll(int mouseScroll) {
 }
 
 UiElement *UiElement::mouseOver(const Point &mouseLocal) {
-    if (m_disabled) return nullptr;
+    if (m_disabled || !m_visible) return nullptr;
 
     const int n = (int)getChildCount();
     for (int i = n - 1; i >= 0; --i) {

@@ -1,4 +1,13 @@
 # Engine Simulator
+
+> **This fork:** unofficial Engine Sim Lab modernization on the `modernization`
+> branch. Download the ready-to-run Windows package and read its security notes:
+> https://github.com/f1nando/engine-sim-community-edition/releases/tag/v1.0.0-lab.1
+> The original Ange Yaghi engine/physics attribution and MIT license are retained.
+> This is not the closed-source Community Edition, nor a validated engineering tool.
+> Piranha's official upstream MIT notice is available at
+> https://github.com/ange-yaghi/piranha/blob/004fa15305655918319e825da760dc5e9fe67f60/LICENSE
+
 ![Alt text](docs/public/screenshots/screenshot_v01.png?raw=true)
 ---
 # Engine Simulator has moved!

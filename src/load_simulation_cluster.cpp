@@ -106,10 +106,31 @@ void LoadSimulationCluster::initialize(EngineSimApplication *app) {
     m_torqueUnits = app->getAppSettings()->torqueUnits;
     m_powerUnits = app->getAppSettings()->powerUnits;
     setUnits();
+    m_gearSelector = addElement<UiElement>();
+    for (auto &selector : m_statusSelectors) selector = addElement<UiElement>();
+}
+
+void LoadSimulationCluster::bindHistoryChannels() {
+    m_app->bindHistory(m_torqueGauge, "dyno_torque", "Dyno torque", "Nm", {}, -100, 500);
+    m_app->bindHistory(m_hpGauge, "dyno_power", "Dyno power", "kW", {}, -50, 250);
+    m_app->bindHistory(m_clutchPressureGauge, "clutch", "Clutch engagement", "%",
+        [this]() { return getTransmission() ? getTransmission()->getClutchPressure() * 100 : 0; }, 0, 100);
+    m_app->bindHistory(m_dynoSpeedGauge, "dyno_speed", "Dyno speed setting", "RPM",
+        [this]() { return units::toRpm(std::abs(m_simulator->m_dyno.m_rotationSpeed)); }, 0, 8000);
+    m_app->bindHistory(m_gearSelector, "gear", "Gear (N=0)", "gear",
+        [this]() { return getTransmission() ? getTransmission()->getGear() + 1.0 : 0; }, 0, 6);
+    m_app->bindHistory(m_statusSelectors[0], "ignition_on", "Ignition enabled", "0/1",
+        [this]() { return isIgnitionOn() ? 1.0 : 0.0; }, 0, 1);
+    m_app->bindHistory(m_statusSelectors[1], "starter_on", "Starter enabled", "0/1",
+        [this]() { return m_simulator->m_starterMotor.m_enabled ? 1.0 : 0.0; }, 0, 1);
+    m_app->bindHistory(m_statusSelectors[2], "dyno_on", "Dyno enabled", "0/1",
+        [this]() { return m_simulator->m_dyno.m_enabled ? 1.0 : 0.0; }, 0, 1);
+    m_app->bindHistory(m_statusSelectors[3], "dyno_hold", "Dyno hold setting", "0/1",
+        [this]() { return m_simulator->m_dyno.m_hold ? 1.0 : 0.0; }, 0, 1);
 }
 
 void LoadSimulationCluster::destroy() {
-    /* void */
+    UiElement::destroy();
 }
 
 void LoadSimulationCluster::update(float dt) {
@@ -199,6 +220,7 @@ void LoadSimulationCluster::render() {
 }
 
 void LoadSimulationCluster::drawCurrentGear(const Bounds &bounds) {
+    m_gearSelector->m_bounds = bounds;
     const Bounds insetBounds = bounds.inset(10.0f);
     const Bounds title = insetBounds.verticalSplit(0.9f, 1.0f);
     const Bounds body = insetBounds.verticalSplit(0.0f, 0.9f);
@@ -256,6 +278,7 @@ void LoadSimulationCluster::drawSystemStatus(const Bounds &bounds) {
         Bounds::lm);
 
     for (int i = 0; i < 4; ++i) {
+        m_statusSelectors[i]->m_bounds = grid.get(bounds, 0, i);
         const Bounds rawBounds = grid.get(right, 0, i);
         const float width = std::fmax(rawBounds.width(), rawBounds.height());
         const Bounds squareBounds(width - 20.0f, 5.0f, rawBounds.getPosition(Bounds::center), Bounds::center);

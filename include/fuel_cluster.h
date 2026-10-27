@@ -16,11 +16,13 @@ class FuelCluster : public UiElement {
 
         virtual void update(float dt);
         virtual void render();
+        void bindHistoryChannels();
 
         Engine *m_engine;
         Simulator *m_simulator;
 
     private:
+        UiElement *m_selectors[5] {};
         double getTotalVolumeFuelConsumed() const;
 };
 

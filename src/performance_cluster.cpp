@@ -178,6 +178,21 @@ void PerformanceCluster::destroy() {
     UiElement::destroy();
 }
 
+void PerformanceCluster::bindHistoryChannels() {
+    m_app->bindHistory(m_fpsGauge, "diag_fps", "FPS (frame held)", "FPS",
+        [this]() { return m_app->getEngine()->GetAverageFramerate(); }, 0, 120);
+    m_app->bindHistory(m_timePerTimestepGauge, "diag_rt", "RT/dT (frame held)", "%",
+        [this]() { return m_timePerTimestep * m_filteredSimulationFrequency * 100; }, 0, 200);
+    m_app->bindHistory(m_simSpeedGauge, "diag_speed", "1 / sim speed", "x",
+        [this]() { return 1 / m_simulator->getSimulationSpeed(); }, 0, 10);
+    m_app->bindHistory(m_audioLagGauge, "diag_latency", "Audio latency", "% target",
+        [this]() { return m_audioLatency * 100; }, 0, 150);
+    m_app->bindHistory(m_inputSamplesGauge, "diag_buffer", "Synth input buffer", "% target",
+        [this]() { return m_inputBufferUsage * 100; }, 0, 200);
+    m_app->bindHistory(m_simulationFrequencyGauge, "diag_frequency", "Physics frequency", "Hz",
+        [this]() { return m_simulator->getSimulationFrequency(); }, 0, 10000);
+}
+
 void PerformanceCluster::update(float dt) {
     UiElement::update(dt);
 

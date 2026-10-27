@@ -22,6 +22,7 @@
 #include "info_cluster.h"
 #include "application_settings.h"
 #include "transmission.h"
+#include "frequency_calibration.h"
 
 #include "delta.h"
 #include "dtv.h"
@@ -37,6 +38,13 @@ class EngineSimApplication {
         virtual ~EngineSimApplication();
 
         static std::string getBuildVersion() { return s_buildVersion; }
+        static bool validateEngineCatalog();
+        bool validateHistoryInterface();
+        void bindHistory(UiElement *element, const std::string &id, const std::string &label,
+            const std::string &unit, std::function<double()> source, double low, double high);
+        void toggleHistory(const std::string &id);
+        bool isHistorySelected(const std::string &id) const;
+        ysVector getHistoryColor(const std::string &id) const;
 
         void initialize(void *instance, ysContextObject::DeviceAPI api);
         void run();
@@ -90,6 +98,10 @@ class EngineSimApplication {
 
     protected:
         void loadScript();
+        bool loadScript(const std::string &path);
+        void showEngineMenu();
+        std::string m_selectedEngine = "main.mr";
+        FrequencyCalibration m_frequencyCalibration;
         void processEngineInput();
         void renderScene();
 

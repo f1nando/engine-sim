@@ -22,6 +22,7 @@ class RightGaugeCluster : public UiElement {
 
         virtual void update(float dt);
         virtual void render();
+        void bindHistoryChannels();
 
         void setEngine(Engine *engine);
         void setUnits();

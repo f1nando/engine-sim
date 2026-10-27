@@ -19,12 +19,52 @@
 #include <chrono>
 #include <stdlib.h>
 #include <sstream>
+#include <filesystem>
+#include <fstream>
+#include "../dependencies/submodules/delta-studio/include/yds_windows_window.h"
+
+namespace {
+    struct EnginePreset { const char *label; const char *path; };
+    const EnginePreset EnginePresets[] = {
+        { "Current main.mr (custom script)", "main.mr" },
+        { "Subaru EJ25 - flat four", "catalog/subaru_ej25.mr" },
+        { "Toyota 2JZ - inline six", "catalog/toyota_2jz.mr" },
+        { "GM LS - V8", "catalog/gm_ls.mr" },
+        { "Honda VTEC - inline four", "catalog/honda_vtec.mr" },
+        { "Audi 2.3 - inline five", "catalog/audi_i5.mr" },
+        { "Lexus LFA (1LR-GUE) - V10", "catalog/lexus_lfa.mr" },
+        { "Ferrari F136 - V8", "catalog/ferrari_f136.mr" },
+        { "Ferrari 412 T2 - V12", "catalog/ferrari_412_t2.mr" },
+        { "Suzuki Hayabusa - inline four", "catalog/suzuki_hayabusa.mr" },
+        { "Harley-Davidson Shovelhead - V-twin", "catalog/harley_shovelhead.mr" },
+        { "Merlin V-1650-9 (NA) - V12", "catalog/merlin_v12.mr" }
+    };
+}
 
 #if ATG_ENGINE_SIM_DISCORD_ENABLED
 #include "../discord/Discord.h"
 #endif
 
 std::string EngineSimApplication::s_buildVersion = "0.1.12a";
+
+bool EngineSimApplication::validateEngineCatalog() {
+    std::ofstream report("catalog-validation.log");
+    bool success = true;
+#ifdef ATG_ENGINE_SIM_PIRANHA_ENABLED
+    for (const auto &preset : EnginePresets) {
+        es_script::Compiler compiler;
+        compiler.initialize();
+        const bool compiled = compiler.compile(std::string("../assets/") + preset.path);
+        report << preset.path << ": " << (compiled ? "PASS" : "FAIL") << '\n';
+        compiler.destroy();
+        success = success && compiled;
+    }
+#else
+    report << "Scripting is disabled\n";
+    success = false;
+#endif
+    return success && report.good();
+}
 
 EngineSimApplication::EngineSimApplication() {
     m_assetPath = "";
@@ -164,6 +204,12 @@ void EngineSimApplication::initialize() {
     m_textRenderer.SetRenderer(m_engine.GetUiRenderer());
     m_textRenderer.SetFont(m_engine.GetConsole()->GetFont());
 
+    std::ifstream selectedEngineFile("../workspace/selected-engine.txt");
+    std::string savedEngine;
+    std::getline(selectedEngineFile, savedEngine);
+    for (const auto &preset : EnginePresets) {
+        if (savedEngine == preset.path) m_selectedEngine = savedEngine;
+    }
     loadScript();
 
     m_audioBuffer.initialize(44100, 44100);
@@ -222,7 +268,7 @@ void EngineSimApplication::process(float frame_dt) {
     if (m_engine.IsKeyDown(ysKey::Code::F1)) {
         m_displayAngle += frame_dt * 1.0f;
     }
-    else if (m_engine.IsKeyDown(ysKey::Code::F2)) {
+    else if (m_engine.IsKeyDown(ysKey::Code::F4)) {
         m_displayAngle -= frame_dt * 1.0f;
     }
     else if (m_engine.ProcessKeyDown(ysKey::Code::F3)) {
@@ -245,6 +291,20 @@ void EngineSimApplication::process(float frame_dt) {
     m_simulator->endFrame();
 
     auto duration = proc_t1 - proc_t0;
+    if (m_frequencyCalibration.active()) {
+        m_frequencyCalibration.sample(frame_dt,
+            std::chrono::duration<double>(duration).count(), iterationCount);
+        if (m_frequencyCalibration.ready()) {
+            const int recommended = m_frequencyCalibration.recommendation();
+            const bool hasHeadroom = m_frequencyCalibration.hasHeadroom(recommended);
+            m_simulator->setSimulationFrequency(recommended);
+            m_frequencyCalibration.cancel();
+            m_infoCluster->setLogMessage("Recommended physics frequency: "
+                + std::to_string(recommended) + (hasHeadroom
+                    ? " Hz (high-RPM reserve) | [N]+wheel: manual"
+                    : " Hz: limited CPU reserve; watch audio at high RPM | [N]+wheel"));
+        }
+    }
     if (iterationCount > 0) {
         m_performanceCluster->addTimePerTimestepSample(
             (duration.count() / 1E9) / iterationCount);
@@ -359,6 +419,10 @@ void EngineSimApplication::run() {
             if (m_simulator->getEngine() != nullptr) {
                 m_audioSource->SetMode(ysAudioSource::Mode::Loop);
             }
+        }
+
+        if (m_engine.ProcessKeyDown(ysKey::Code::F2)) {
+            showEngineMenu();
         }
 
         if (m_engine.ProcessKeyDown(ysKey::Code::Tab)) {
@@ -479,7 +543,13 @@ void EngineSimApplication::loadEngine(
     m_viewParameters.Layer1 = engine->getMaxDepth();
     engine->calculateDisplacement();
 
-    m_simulator->setSimulationFrequency(engine->getSimulationFrequency());
+    // This machine's baseline audio was stable at 10 kHz, but not at 20 kHz.
+    // Keep lower model defaults; N + wheel remains available for manual tuning.
+    constexpr int StartupSimulationFrequencyLimit = 10000;
+    const int modelFrequency = engine->getSimulationFrequency();
+    m_simulator->setSimulationFrequency(modelFrequency < StartupSimulationFrequencyLimit
+        ? modelFrequency : StartupSimulationFrequencyLimit);
+    m_frequencyCalibration.begin(modelFrequency);
 
     Synthesizer::AudioParameters audioParams = m_simulator->synthesizer().getAudioParameters();
     audioParams.inputSampleNoise = static_cast<float>(engine->getInitialJitter());
@@ -616,6 +686,51 @@ const SimulationObject::ViewParameters &
 }
 
 void EngineSimApplication::loadScript() {
+    if (!loadScript(m_assetPath + "/" + m_selectedEngine) && m_simulator == nullptr) {
+        // A missing saved preset must not prevent startup with the user's main script.
+        m_selectedEngine = "main.mr";
+        loadScript(m_assetPath + "/main.mr");
+    }
+}
+
+void EngineSimApplication::showEngineMenu() {
+    if (isRecording()) {
+        m_infoCluster->setLogMessage("Stop recording before changing engine");
+        return;
+    }
+    HMENU menu = CreatePopupMenu();
+    if (menu == nullptr) return;
+    unsigned int id = 1;
+    for (const auto &preset : EnginePresets) {
+        AppendMenuA(menu, MF_STRING | (m_selectedEngine == preset.path ? MF_CHECKED : 0), id++, preset.label);
+    }
+    POINT position;
+    GetCursorPos(&position);
+    HWND window = static_cast<ysWindowsWindow *>(m_engine.GetGameWindow())->GetWindowHandle();
+    // Freeze audio while the modal menu stops frame processing.
+    m_audioSource->SetMode(ysAudioSource::Mode::Stop);
+    const unsigned int choice = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY,
+        position.x, position.y, 0, window, nullptr);
+    DestroyMenu(menu);
+    if (choice > 0 && choice <= sizeof(EnginePresets) / sizeof(EnginePresets[0])) {
+        const auto &preset = EnginePresets[choice - 1];
+        if (loadScript(m_assetPath + "/" + preset.path)) {
+            m_selectedEngine = preset.path;
+            std::error_code error;
+            std::filesystem::create_directories("../workspace", error);
+            std::ofstream settings("../workspace/selected-engine.txt");
+            settings << m_selectedEngine << '\n';
+            m_infoCluster->setLogMessage(settings ? "Calibrating physics (~4s). [N]+wheel: manual, [A]/[S]: start"
+                : "Engine loaded; selection could not be saved");
+        }
+    }
+    m_lastMouseWheel = m_engine.GetMouseWheel();
+    if (m_simulator != nullptr && m_simulator->getEngine() != nullptr) {
+        m_audioSource->SetMode(ysAudioSource::Mode::Loop);
+    }
+}
+
+bool EngineSimApplication::loadScript(const std::string &path) {
     Engine *engine = nullptr;
     Vehicle *vehicle = nullptr;
     Transmission *transmission = nullptr;
@@ -623,7 +738,7 @@ void EngineSimApplication::loadScript() {
 #ifdef ATG_ENGINE_SIM_PIRANHA_ENABLED
     es_script::Compiler compiler;
     compiler.initialize();
-    const bool compiled = compiler.compile("../assets/main.mr");
+    const bool compiled = compiler.compile(path);
     if (compiled) {
         const es_script::Compiler::Output output = compiler.execute();
         configure(output.applicationSettings);
@@ -633,13 +748,20 @@ void EngineSimApplication::loadScript() {
         transmission = output.transmission;
     }
     else {
-        engine = nullptr;
-        vehicle = nullptr;
-        transmission = nullptr;
+        compiler.destroy();
+        if (m_infoCluster != nullptr) m_infoCluster->setLogMessage("Engine load failed; see error_log.log");
+        return false;
     }
 
     compiler.destroy();
 #endif /* ATG_ENGINE_SIM_PIRANHA_ENABLED */
+
+    if (engine == nullptr) {
+        delete vehicle;
+        delete transmission;
+        if (m_infoCluster != nullptr) m_infoCluster->setLogMessage("Script did not produce an engine");
+        return false;
+    }
 
     if (vehicle == nullptr) {
         Vehicle::Parameters vehParams;
@@ -664,7 +786,20 @@ void EngineSimApplication::loadScript() {
     }
 
     loadEngine(engine, vehicle, transmission);
+    if (m_audioSource != nullptr) {
+        void *buffer = nullptr;
+        SampleOffset samples = 0;
+        if (m_audioSource->LockEntireBuffer(&buffer, &samples) == ysError::None) {
+            memset(buffer, 0, samples * sizeof(int16_t));
+            m_audioSource->UnlockBuffer(buffer, samples);
+        }
+        for (int i = 0; i < 44100; ++i) m_audioBuffer.writeSample(0, i);
+        m_audioBuffer.m_writePointer = m_audioBuffer.getBufferIndex(
+            m_audioSource->GetCurrentWritePosition(), 4410);
+        m_oscillatorSampleOffset = 0;
+    }
     refreshUserInterface();
+    return true;
 }
 
 void EngineSimApplication::processEngineInput() {
@@ -746,6 +881,7 @@ void EngineSimApplication::processEngineInput() {
         m_infoCluster->setLogMessage("[B] - Set high freq. noise to " + std::to_string(audioParams.inputSampleNoise));
     }
     else if (m_engine.IsKeyDown(ysKey::Code::N)) {
+        m_frequencyCalibration.cancel();
         const double rate = fineControlMode
             ? 10.0
             : 100.0;
@@ -943,26 +1079,22 @@ void EngineSimApplication::renderScene() {
 
     if (m_screen == 0) {
         Bounds windowBounds((float)screenWidth, (float)screenHeight, { 0, (float)screenHeight });
-        Grid grid;
-        grid.v_cells = 2;
-        grid.h_cells = 3;
-        Grid grid3x3;
-        grid3x3.v_cells = 3;
-        grid3x3.h_cells = 3;
+        const Bounds upperBounds = windowBounds.verticalSplit(0.42f, 1.0f);
         m_engineView->setDrawFrame(true);
-        m_engineView->setBounds(grid.get(windowBounds, 1, 0, 1, 1));
+        m_engineView->setBounds(upperBounds.horizontalSplit(0.25f, 0.55f));
         m_engineView->setLocalPosition({ 0, 0 });
 
-        m_rightGaugeCluster->m_bounds = grid.get(windowBounds, 2, 0, 1, 2);
-        m_oscCluster->m_bounds = grid.get(windowBounds, 1, 1);
-        m_performanceCluster->m_bounds = grid3x3.get(windowBounds, 0, 1);
-        m_loadSimulationCluster->m_bounds = grid3x3.get(windowBounds, 0, 2);
+        m_rightGaugeCluster->m_bounds = upperBounds.horizontalSplit(0.55f, 1.0f);
+        m_oscCluster->m_bounds = windowBounds.verticalSplit(0.0f, 0.42f);
+        const Bounds controlsBounds = upperBounds.horizontalSplit(0.0f, 0.25f);
+        m_performanceCluster->m_bounds = controlsBounds.verticalSplit(0.34f, 0.67f);
+        m_loadSimulationCluster->m_bounds = controlsBounds.verticalSplit(0.0f, 0.34f);
 
         Grid grid1x3;
         grid1x3.v_cells = 3;
         grid1x3.h_cells = 1;
-        m_mixerCluster->m_bounds = grid1x3.get(grid3x3.get(windowBounds, 0, 0), 0, 2);
-        m_infoCluster->m_bounds = grid1x3.get(grid3x3.get(windowBounds, 0, 0), 0, 0, 1, 2);
+        m_mixerCluster->m_bounds = grid1x3.get(controlsBounds.verticalSplit(0.67f, 1.0f), 0, 2);
+        m_infoCluster->m_bounds = grid1x3.get(controlsBounds.verticalSplit(0.67f, 1.0f), 0, 0, 1, 2);
 
         m_engineView->setVisible(true);
         m_rightGaugeCluster->setVisible(true);
@@ -1062,6 +1194,10 @@ void EngineSimApplication::refreshUserInterface() {
     m_infoCluster = m_uiManager.getRoot()->addElement<InfoCluster>();
 
     m_infoCluster->setEngine(m_iceEngine);
+    m_infoCluster->setLogMessage("[F2] Choose engine | [Enter] Reload | [A] Ignition | [S] Starter");
+    if (m_frequencyCalibration.active()) {
+        m_infoCluster->setLogMessage("Calibrating physics (~4s). [N]+wheel: manual, [F2]: engines");
+    }
     m_rightGaugeCluster->m_simulator = m_simulator;
     m_rightGaugeCluster->setEngine(m_iceEngine);
     m_oscCluster->setSimulator(m_simulator);
@@ -1070,7 +1206,13 @@ void EngineSimApplication::refreshUserInterface() {
     }
     m_performanceCluster->setSimulator(m_simulator);
     m_loadSimulationCluster->setSimulator(m_simulator);
+    if (m_iceEngine != nullptr) {
+        m_performanceCluster->bindHistoryChannels();
+        m_loadSimulationCluster->bindHistoryChannels();
+        m_rightGaugeCluster->bindHistoryChannels();
+    }
     m_mixerCluster->setSimulator(m_simulator);
+    if (m_iceEngine != nullptr) m_mixerCluster->bindHistoryChannels();
 }
 
 void EngineSimApplication::startRecording() {

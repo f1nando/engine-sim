@@ -6,6 +6,7 @@
 #include "delta.h"
 
 #include <vector>
+#include <string>
 
 class EngineSimApplication;
 class UiElement {
@@ -35,6 +36,8 @@ class UiElement {
 
         bool isMouseOver() const { return m_mouseOver; }
         bool isMouseHeld() const { return m_mouseHeld; }
+        void bindHistory(const std::string &id) { m_historyChannel = id; m_checkMouse = true; }
+        const std::string &getHistoryChannel() const { return m_historyChannel; }
 
         template <typename T_Element>
         T_Element *addElement(UiElement *signalTarget = nullptr) {
@@ -63,6 +66,7 @@ class UiElement {
         bool isVisible() const { return m_visible; }
 
         size_t getChildCount() const { return m_children.size(); }
+        UiElement *getChild(size_t index) const { return m_children[index]; }
 
         void bringToFront(UiElement *element);
         void activate();
@@ -132,6 +136,7 @@ class UiElement {
 
     protected:
         EngineSimApplication *m_app;
+        std::string m_historyChannel;
 };
 
 #endif /* ATG_ENGINE_SIM_UI_ELEMENT_H */

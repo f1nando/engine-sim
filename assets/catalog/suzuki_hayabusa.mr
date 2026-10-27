@@ -1,0 +1,5 @@
+import "engine_sim.mr"
+import "../themes/default.mr"
+import "../engines/atg-video-1/04_hayabusa.mr"
+use_default_theme()
+main()

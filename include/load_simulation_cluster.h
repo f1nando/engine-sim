@@ -16,6 +16,7 @@ class LoadSimulationCluster : public UiElement {
 
         virtual void update(float dt);
         virtual void render();
+        void bindHistoryChannels();
         void setUnits();
 
         void setSimulator(Simulator *simulator) { m_simulator = simulator; }
@@ -35,6 +36,8 @@ class LoadSimulationCluster : public UiElement {
         LabeledGauge *m_torqueGauge;
         LabeledGauge *m_hpGauge;
         LabeledGauge *m_clutchPressureGauge;
+        UiElement *m_gearSelector = nullptr;
+        UiElement *m_statusSelectors[4] {};
 
         double m_filteredHorsepower;
         double m_filteredTorque;

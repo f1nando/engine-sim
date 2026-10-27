@@ -163,6 +163,33 @@ void RightGaugeCluster::destroy() {
     UiElement::destroy();
 }
 
+void RightGaugeCluster::bindHistoryChannels() {
+    m_app->bindHistory(m_tachometer, "rpm", "Engine speed", "RPM", {}, 0, 8000);
+    const bool mph = m_speedUnits == "mph";
+    m_app->bindHistory(m_speedometer, "vehicle_speed", "Vehicle speed", mph ? "mph" : "km/h",
+        [this, mph]() { return units::convert(std::abs(getSpeed()), mph ? units::mile / units::hour : units::km / units::hour); }, 0, 200);
+    m_app->bindHistory(m_throttleDisplay, "throttle_angle", "Throttle plate angle", "deg",
+        [this]() { return units::convert(m_engine->getThrottlePlateAngle(), units::deg); }, 0, 90);
+    m_app->bindHistory(m_manifoldVacuumGauge, "manifold_pressure", m_isAbsolute ? "Manifold absolute" : "Manifold vacuum",
+        m_manifoldVacuumGauge->m_unit, [this]() {
+            const double value = getManifoldPressureWithUnits(units::atm);
+            return !m_isAbsolute && value > -0.5 ? 0.0 : value;
+        }, m_manifoldVacuumGauge->m_gauge->m_min, m_manifoldVacuumGauge->m_gauge->m_max);
+    m_app->bindHistory(m_intakeCfmGauge, "air_flow", "Intake air flow", "SCFM",
+        [this]() { return units::convert(m_engine->getIntakeFlowRate(), units::scfm); }, 0, 1200);
+    m_app->bindHistory(m_volumetricEffGauge, "volumetric_eff", "Volumetric eff.", "%",
+        [this]() {
+            const double theoretical = 0.5 * units::atm * m_engine->getDisplacement()
+                / (constants::R * units::celcius(25.0)) * getRpm() / 60;
+            return std::abs(theoretical) < 1e-3 ? std::nan("") : m_engine->getIntakeFlowRate() / theoretical * 100;
+        }, 0, 120);
+    m_afrCluster->m_engine = m_engine;
+    m_afrCluster->bindHistoryChannels();
+    m_fuelCluster->m_engine = m_engine;
+    m_fuelCluster->m_simulator = m_simulator;
+    m_fuelCluster->bindHistoryChannels();
+}
+
 void RightGaugeCluster::update(float dt) {
     m_combusionChamberStatus->m_engine = m_engine;
     m_throttleDisplay->m_engine = m_engine;
@@ -176,10 +203,14 @@ void RightGaugeCluster::update(float dt) {
 void RightGaugeCluster::render() {
     drawFrame(m_bounds, 1.0, m_app->getForegroundColor(), m_app->getBackgroundColor());
 
-    const Bounds tachSpeedCluster = m_bounds.verticalSplit(0.5f, 1.0f);
+    // The laboratory layout has a wide, shallow instrument area above the plot.
+    const bool wide = m_bounds.width() > m_bounds.height() * 0.9f;
+    const Bounds tachSpeedCluster = wide
+        ? m_bounds.horizontalSplit(0.0f, 0.5f) : m_bounds.verticalSplit(0.5f, 1.0f);
     renderTachSpeedCluster(tachSpeedCluster);
 
-    const Bounds fuelAirCluster = m_bounds.verticalSplit(0.0f, 0.5f);
+    const Bounds fuelAirCluster = wide
+        ? m_bounds.horizontalSplit(0.5f, 1.0f) : m_bounds.verticalSplit(0.0f, 0.5f);
     renderFuelAirCluster(fuelAirCluster);
 
     UiElement::render();

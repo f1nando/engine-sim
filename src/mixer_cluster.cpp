@@ -139,6 +139,24 @@ void MixerCluster::destroy() {
     UiElement::destroy();
 }
 
+void MixerCluster::bindHistoryChannels() {
+    m_app->bindHistory(m_volumeGauge, "audio_volume", "Audio volume setting", "%",
+        [this]() { return m_simulator->synthesizer().getAudioParameters().volume * 100; }, 0, 100);
+    m_app->bindHistory(m_convolutionGauge, "audio_convolution", "Convolution setting", "%",
+        [this]() { return m_simulator->synthesizer().getAudioParameters().convolution * 100; }, 0, 100);
+    m_app->bindHistory(m_highFreqFilterGauge, "audio_hf", "Audio HF setting", "x1000",
+        [this]() { return m_simulator->synthesizer().getAudioParameters().dF_F_mix * 1000; }, 0, 10);
+    m_app->bindHistory(m_noise0Gauge, "audio_lf_noise", "Audio LF noise set.", "%",
+        [this]() { return m_simulator->synthesizer().getAudioParameters().airNoise * 100; }, 0, 100);
+    m_app->bindHistory(m_noise1Gauge, "audio_hf_noise", "Audio HF noise set.", "%",
+        [this]() { return m_simulator->synthesizer().getAudioParameters().inputSampleNoise * 100; }, 0, 100);
+    m_app->bindHistory(m_levelerGauge, "audio_leveler", "Audio leveler gauge", "%",
+        [this]() {
+            const auto parameters = m_simulator->synthesizer().getAudioParameters();
+            return 100 * (m_simulator->synthesizer().getLevelerGain() - parameters.levelerMinGain) / parameters.levelerMaxGain;
+        }, 0, 100);
+}
+
 void MixerCluster::update(float dt) {
     UiElement::update(dt);
 }

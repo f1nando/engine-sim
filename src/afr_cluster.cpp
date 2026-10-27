@@ -64,6 +64,13 @@ void AfrCluster::destroy() {
     UiElement::destroy();
 }
 
+void AfrCluster::bindHistoryChannels() {
+    m_app->bindHistory(m_intakeAfrGauge, "intake_afr", "Intake AFR", "ratio",
+        [this]() { return m_engine->getIntakeAfr(); }, 0, 30);
+    m_app->bindHistory(m_exhaustAfrGauge, "exhaust_o2", "Exhaust oxygen", "%",
+        [this]() { return m_engine->getExhaustO2() * 100; }, 0, 100);
+}
+
 void AfrCluster::update(float dt) {
     UiElement::update(dt);
 }

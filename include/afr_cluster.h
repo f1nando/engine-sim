@@ -20,6 +20,7 @@ class AfrCluster : public UiElement {
 
         virtual void update(float dt);
         virtual void render();
+        void bindHistoryChannels();
 
         Engine *m_engine;
 
